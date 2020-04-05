@@ -61,6 +61,40 @@ Mesh::~Mesh()
 {
 }
 
+glm::mat4 calculateU(std::vector<Joint> joints, int id)
+{
+	Joint curr_joint = joints[id];
+	if (curr_joint.parent_index == -1) {
+		glm::mat4 B = glm::mat4(1.0f);
+		B[3] = glm::vec4(curr_joint.position, 1) - glm::vec4(0, 0, 0, 0);
+		return B * glm::mat4(1.0f);
+	}
+	else {
+		glm::mat4 parentU = joints[curr_joint.parent_index].U;
+		joints[curr_joint.parent_index].children.push_back(id);
+		glm::mat4 B = glm::mat4(1.0f);
+		B[3] = glm::vec4(curr_joint.position, 1) - glm::vec4(joints[curr_joint.parent_index].position, 0);
+		joints[id].init_rel_position = glm::vec3(B[3]);
+		return parentU * B;
+	}
+}
+
+glm::mat4 calculateD(std::vector<Joint> joints, int id)
+{
+	Joint curr_joint = joints[id];
+	if (curr_joint.parent_index == -1) {
+		glm::mat4 B = glm::mat4(1.0f);
+		B[3] = glm::vec4(curr_joint.position, 1) - glm::vec4(0, 0, 0, 0);
+		return B * curr_joint.T;
+	}
+	else {
+		glm::mat4 parentD = joints[curr_joint.parent_index].D;
+		glm::mat4 B = glm::mat4(1.0f);
+		B[3] = glm::vec4(curr_joint.position, 1) - glm::vec4(joints[curr_joint.parent_index].position, 0);
+		return parentD * B * curr_joint.T;
+	}
+}
+
 void Mesh::loadPmd(const std::string& fn)
 {
 	MMDReader mr;
@@ -72,6 +106,21 @@ void Mesh::loadPmd(const std::string& fn)
 	// FIXME: load skeleton and blend weights from PMD file,
 	//        initialize std::vectors for the vertex attributes,
 	//        also initialize the skeleton as needed
+
+	glm::vec3 wcoord;
+	int parent;
+	
+	int curr_id = 0;
+	skeleton.joints.clear();
+	while (mr.getJoint(curr_id, wcoord, parent)) {
+		Joint curr_joint = Joint(curr_id, wcoord, parent);
+		curr_joint.T = glm::mat4(1.0f);
+		curr_joint.children.clear();
+		skeleton.joints.push_back(curr_joint);
+		skeleton.joints[skeleton.joints.size() - 1].U = calculateU(skeleton.joints, curr_id);
+		skeleton.joints[skeleton.joints.size() - 1].D = calculateD(skeleton.joints, curr_id);
+		curr_id++;
+	}
 }
 
 int Mesh::getNumberOfBones() const

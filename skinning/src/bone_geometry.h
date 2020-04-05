@@ -45,6 +45,10 @@ struct Joint {
 	glm::vec3 init_position;        // initial position of this joint
 	glm::vec3 init_rel_position;    // initial relative position to its parent
 	std::vector<int> children;
+
+	glm::mat4 T;
+	glm::mat4 D;
+	glm::mat4 U;
 };
 
 struct Configuration {
