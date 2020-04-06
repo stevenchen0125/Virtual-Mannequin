@@ -83,6 +83,8 @@ private:
 	bool captureWASDUPDOWN(int key, int action);
 
 	bool play_ = false;
+
+	int intersectCylinder(glm::vec3 direction, glm::vec3 position);
 };
 
 #endif

@@ -92,6 +92,30 @@ void GUI::keyCallback(int key, int scancode, int action, int mods)
 	// FIXME: implement other controls here.
 }
 
+int GUI::intersectCylinder(glm::vec3 direction, glm::vec3 position)
+{
+	double best_t = 1e6;
+	for (int i = 0; i < mesh_->skeleton.joints.size(); i++) {
+		Joint curr_joint = mesh_->skeleton.joints[i];
+		glm::vec3 parent_joint_loc;
+		if (curr_joint.parent_index == -1) {
+			parent_joint_loc = glm::vec3(0,0,0);
+		}
+		else {
+			parent_joint_loc = mesh_->skeleton.joints[curr_joint.parent_index].position;
+		}
+		glm::vec3 beg_pos = curr_joint.position;
+		glm::vec3 end_pos = parent_joint_loc;
+
+		glm::vec3 cylinder_axis = glm::normalize(beg_pos - end_pos);
+		glm::vec3 z_axis = glm::normalize(glm::vec3(0, 0, 1));
+		auto dot = glm::dot(cylinder_axis, z_axis);
+		auto cross = glm::cross(cylinder_axis, z_axis);
+		auto mag_cross = glm::length(cross);
+
+	}
+}
+
 void GUI::mousePosCallback(double mouse_x, double mouse_y)
 {
 	last_x_ = current_x_;
@@ -126,6 +150,15 @@ void GUI::mousePosCallback(double mouse_x, double mouse_y)
 		// FIXME: Handle bone rotation
 		return ;
 	}
+	//std::cout << current_x_ << " " << current_y_ << std::endl;
+	//kNear
+	glm::vec3 mouse_world_coord = glm::inverse(view_matrix_) * glm::inverse(projection_matrix_) * glm::vec4(current_x_, current_y_, 0, 1);
+	glm::vec3 mouse_ray = glm::normalize(mouse_world_coord - eye_);
+
+	
+
+	//std::cout << mouse_world_coord.x << ", " << mouse_world_coord.y << ", " << mouse_world_coord.z << std::endl;
+	//std::cout << mouse_ray.x << ", " << mouse_ray.y << ", " << mouse_ray.z << std::endl;
 
 	// FIXME: highlight bones that have been moused over
 	current_bone_ = -1;
