@@ -95,7 +95,10 @@ void GUI::keyCallback(int key, int scancode, int action, int mods)
 int GUI::intersectCylinder(glm::vec3 direction, glm::vec3 position)
 {
 	double best_t = 1e6;
-	for (int i = 0; i < mesh_->skeleton.joints.size(); i++) {
+	int best_i = -1;
+	auto epsilon = 1e-7;
+
+	for (int i = 0; (unsigned)i < mesh_->skeleton.joints.size(); i++) {
 		Joint curr_joint = mesh_->skeleton.joints[i];
 		glm::vec3 parent_joint_loc;
 		if (curr_joint.parent_index == -1) {
@@ -108,20 +111,73 @@ int GUI::intersectCylinder(glm::vec3 direction, glm::vec3 position)
 		glm::vec3 end_pos = parent_joint_loc;
 
 		glm::vec3 cylinder_axis = glm::normalize(beg_pos - end_pos);
+		auto height = glm::length(beg_pos - end_pos);
 		glm::vec3 z_axis = glm::normalize(glm::vec3(0, 0, 1));
 		auto dot = glm::dot(cylinder_axis, z_axis);
 		auto cross = glm::cross(cylinder_axis, z_axis);
 		auto mag_cross = glm::length(cross);
+		glm::mat3 change_of_coordinates;
+		if (mag_cross < epsilon) {
+			change_of_coordinates = glm::mat3(1.0f);
+			if (glm::dot(cylinder_axis, z_axis) < 0) {
+				change_of_coordinates = glm::mat3(-1.0f);
+			}
+		}
+		else {
+			auto u = cylinder_axis;
+			auto v = glm::normalize(z_axis - dot * cylinder_axis);
+			auto w = glm::normalize(glm::cross(z_axis, cylinder_axis));
 
+			glm::mat3 rotation = glm::mat3(0.0f);
+			rotation[2][2] = 1;
+			rotation[0][0] = dot;
+			rotation[1][1] = dot;
+			rotation[0][1] = mag_cross;
+			rotation[1][0] = -mag_cross;
+
+			glm::mat3 coordinate_change = glm::inverse(glm::mat3(u, v, w));
+
+			change_of_coordinates = glm::inverse(coordinate_change) * rotation * coordinate_change;
+		}
+
+		glm::vec3 changed_direction = glm::normalize(change_of_coordinates * direction);
+		glm::vec3 changed_position = change_of_coordinates * (position-end_pos);
+		auto vx = changed_direction.x;
+		auto vy = changed_direction.y;
+		auto px = changed_position.x;
+		auto py = changed_position.y;
+		auto a = vx*vx+vy*vy;
+		auto b = 2*(px*vx+py*vy);
+		auto c = px * px + py * py - kCylinderRadius * kCylinderRadius;
+
+		if (a == 0) {
+			continue;
+		}
+		auto discriminant = b*b-4*a*c;
+		if (discriminant < 0) {
+			continue;
+		}
+		discriminant = sqrt(discriminant);
+		auto t2 = (-b + discriminant) / (2 * a);
+		if (t2 < 0) {
+			continue;
+		}
+		auto t1 = (-b - discriminant) / (2 * a);
+		double z = t1 * (double)changed_direction.z + (double)changed_position.z;
+		if (t1 < best_t && z >= 0 && z <= height) {
+			best_t = t1;
+			best_i = i;
+		}
 	}
+	return best_i;
 }
 
 void GUI::mousePosCallback(double mouse_x, double mouse_y)
 {
 	last_x_ = current_x_;
 	last_y_ = current_y_;
-	current_x_ = mouse_x;
-	current_y_ = window_height_ - mouse_y;
+	current_x_ = (float)mouse_x;
+	current_y_ = window_height_ - (float)mouse_y;
 	float delta_x = current_x_ - last_x_;
 	float delta_y = current_y_ - last_y_;
 	if (sqrt(delta_x * delta_x + delta_y * delta_y) < 1e-15)
@@ -150,18 +206,13 @@ void GUI::mousePosCallback(double mouse_x, double mouse_y)
 		// FIXME: Handle bone rotation
 		return ;
 	}
-	//std::cout << current_x_ << " " << current_y_ << std::endl;
-	//kNear
-	glm::vec3 mouse_world_coord = glm::inverse(view_matrix_) * glm::inverse(projection_matrix_) * glm::vec4(current_x_, current_y_, 0, 1);
-	glm::vec3 mouse_ray = glm::normalize(mouse_world_coord - eye_);
 
-	
-
-	//std::cout << mouse_world_coord.x << ", " << mouse_world_coord.y << ", " << mouse_world_coord.z << std::endl;
-	//std::cout << mouse_ray.x << ", " << mouse_ray.y << ", " << mouse_ray.z << std::endl;
+	glm::vec3 temp = (glm::unProject(glm::vec3(current_x_, current_y_, -1), view_matrix_ * model_matrix_, projection_matrix_, viewport));
+	glm::vec3 mouse_ray = glm::normalize(temp - eye_);
+	int intersection_index = intersectCylinder(mouse_ray, eye_);
 
 	// FIXME: highlight bones that have been moused over
-	current_bone_ = -1;
+	current_bone_ = intersection_index;
 }
 
 void GUI::mouseButtonCallback(int button, int action, int mods)

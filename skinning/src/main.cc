@@ -50,6 +50,13 @@ const char* bone_fragment_shader =
 ;
 
 // FIXME: Add more shaders here.
+const char* cylinder_vertex_shader =
+#include "shaders/cylinder.vert"
+;
+
+const char* cylinder_fragment_shader =
+#include "shaders/cylinder.frag"
+;
 
 void ErrorCallback(int error, const char* description) {
 	std::cerr << "GLFW Error: " << description << "\n";
@@ -243,6 +250,16 @@ int main(int argc, char* argv[])
 
 	// FIXME: Create the RenderPass objects for bones here.
 	//        Otherwise do whatever you like.
+	RenderDataInput cylinder_pass_input;
+	std::vector<glm::vec3> cylinder_positions;
+	cylinder_positions.clear();
+	cylinder_pass_input.assign(0, "vertex_position", cylinder_positions.data(), cylinder_positions.size(), 1, GL_FLOAT);
+	cylinder_pass_input.assignIndex(cylinder_positions.data(), cylinder_positions.size(), 2);
+	RenderPass cylinder_pass(-1, cylinder_pass_input,
+		{ cylinder_vertex_shader, nullptr, cylinder_fragment_shader },
+		{ std_model, std_view, std_proj },
+		{ "fragment_color" }
+		);
 
 	float aspect = 0.0f;
 	std::cout << "center = " << mesh.getCenter() << "\n";
