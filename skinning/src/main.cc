@@ -58,8 +58,26 @@ const char* cylinder_fragment_shader =
 #include "shaders/cylinder.frag"
 ;
 
+const char* axes_vertex_shader =
+#include "shaders/axes.vert"
+;
+
+const char* axes_fragment_shader =
+#include "shaders/axes.frag"
+;
+
 void ErrorCallback(int error, const char* description) {
 	std::cerr << "GLFW Error: " << description << "\n";
+}
+
+void printVec3(glm::vec3 vec)
+{
+	std::cout << vec.x << ", " << vec.y << ", " << vec.z << ", " << std::endl;
+}
+
+void printVec4(glm::vec4 vec)
+{
+	std::cout << vec.x << ", " << vec.y << ", " << vec.z << ", " << vec.w << std::endl;
 }
 
 GLFWwindow* init_glefw()
@@ -181,8 +199,15 @@ int main(int argc, char* argv[])
 	std::function<std::vector<glm::fquat>()> rot_data = [&mesh](){ return mesh.getCurrentQ()->rotData(); };
 	auto joint_trans = make_uniform("joint_trans", trans_data);
 	auto joint_rot = make_uniform("joint_rot", rot_data);
+
 	// FIXME: define more ShaderUniforms for RenderPass if you want to use it.
 	//        Otherwise, do whatever you like here
+	glm::mat4 cylinder_rotation;
+	glm::mat4 cylinder_scaling;
+	glm::mat4 cylinder_translation;
+	glm::mat4 bone_mat = glm::mat4(1.0f);
+	std::function<glm::mat4()> cylinder_data = [&bone_mat]() {return bone_mat; };
+	auto bone_transform = make_uniform("bone_transform", cylinder_data);
 
 	// Floor render pass
 	RenderDataInput floor_pass_input;
@@ -251,15 +276,22 @@ int main(int argc, char* argv[])
 	// FIXME: Create the RenderPass objects for bones here.
 	//        Otherwise do whatever you like.
 	RenderDataInput cylinder_pass_input;
-	std::vector<glm::vec3> cylinder_positions;
-	cylinder_positions.clear();
-	cylinder_pass_input.assign(0, "vertex_position", cylinder_positions.data(), cylinder_positions.size(), 1, GL_FLOAT);
-	cylinder_pass_input.assignIndex(cylinder_positions.data(), cylinder_positions.size(), 2);
+	cylinder_pass_input.assign(0, "vertex_position", cylinder_mesh.vertices.data(), cylinder_mesh.vertices.size(), 4, GL_FLOAT);
+	cylinder_pass_input.assignIndex(cylinder_mesh.indices.data(), cylinder_mesh.indices.size(), 2);
 	RenderPass cylinder_pass(-1, cylinder_pass_input,
 		{ cylinder_vertex_shader, nullptr, cylinder_fragment_shader },
-		{ std_model, std_view, std_proj },
+		{ bone_transform, std_model, std_view, std_proj },
 		{ "fragment_color" }
 		);
+
+	RenderDataInput axes_pass_input;
+	axes_pass_input.assign(0, "vertex_position", axes_mesh.vertices.data(), axes_mesh.vertices.size(), 4, GL_FLOAT);
+	axes_pass_input.assignIndex(axes_mesh.indices.data(), axes_mesh.indices.size(), 2);
+	RenderPass axes_pass(-1, axes_pass_input,
+		{ axes_vertex_shader, nullptr, axes_fragment_shader },
+		{ bone_transform, std_model, std_view, std_proj },
+		{ "fragment_color" }
+	);
 
 	float aspect = 0.0f;
 	std::cout << "center = " << mesh.getCenter() << "\n";
@@ -307,8 +339,85 @@ int main(int argc, char* argv[])
 			CHECK_GL_ERROR(glDrawElements(GL_LINES,
 			                              bone_indices.size() * 2,
 			                              GL_UNSIGNED_INT, 0));
+
 		}
 		draw_cylinder = (current_bone != -1 && gui.isTransparent());
+		if (draw_cylinder) {
+			Joint curr_joint = mesh.skeleton.joints[current_bone];
+			glm::vec3 parent_joint_loc = glm::vec3(0, 0, 0);
+			if (curr_joint.parent_index != -1) {
+				parent_joint_loc = mesh.skeleton.joints[curr_joint.parent_index].position;
+			}
+			glm::vec3 beg_pos = curr_joint.position;
+			glm::vec3 end_pos = parent_joint_loc;
+			float height = glm::length(beg_pos - end_pos);
+
+			glm::vec3 cylinder_axis = glm::normalize(end_pos - beg_pos);
+			glm::vec3 y_axis = glm::normalize(glm::vec3(0, 1, 0));
+			auto dot = glm::dot(cylinder_axis, y_axis);
+			auto cross = glm::cross(cylinder_axis, y_axis);
+			auto mag_cross = glm::length(cross);
+			const auto epsilon = 1e-7;
+			glm::mat3 change_of_coordinates;
+			if (mag_cross < epsilon) {
+				change_of_coordinates = glm::mat3(1.0f);
+				if (glm::dot(cylinder_axis, y_axis) < 0) {
+					change_of_coordinates = glm::mat3(-1.0f);
+				}
+			}
+			else {
+				auto u = cylinder_axis;
+				auto v = glm::normalize(y_axis - dot * cylinder_axis);
+				auto w = glm::normalize(glm::cross(y_axis, cylinder_axis));
+
+				glm::mat3 rotation = glm::mat3(0.0f);
+				rotation[2][2] = 1;
+				rotation[0][0] = dot;
+				rotation[1][1] = dot;
+				rotation[0][1] = mag_cross;
+				rotation[1][0] = -mag_cross;
+
+				glm::mat3 coordinate_change = glm::inverse(glm::mat3(u, v, w));
+
+				change_of_coordinates = glm::inverse(coordinate_change) * rotation * coordinate_change;
+			}
+			glm::mat4 cylinder_rotation_helper = glm::mat4(1.0f);
+			cylinder_rotation_helper[0][0] = -1;
+			cylinder_rotation_helper[2][2] = -1;
+
+			cylinder_rotation = cylinder_rotation_helper * glm::mat4(change_of_coordinates);
+			/*cylinder_rotation[0][0] = cylinder_rotation[0][0];
+			cylinder_rotation[1][1] = cylinder_rotation[1][1];
+			cylinder_rotation[2][2] = cylinder_rotation[2][2];*/
+
+
+			cylinder_scaling = glm::mat4(1.0f);
+			cylinder_scaling[0][0] = kCylinderRadius;
+			cylinder_scaling[1][1] = height;
+			cylinder_scaling[2][2] = kCylinderRadius;
+
+			cylinder_translation = glm::mat4(1.0f);
+			cylinder_translation[3][0] = beg_pos.x;
+			cylinder_translation[3][1] = beg_pos.y;
+			cylinder_translation[3][2] = beg_pos.z;
+
+			bone_mat = cylinder_translation * cylinder_rotation * cylinder_scaling;
+
+			cylinder_pass.setup();
+			CHECK_GL_ERROR(glDrawElements(GL_LINES,
+				cylinder_mesh.indices.size() * 2,
+				GL_UNSIGNED_INT, 0));
+
+			glm::mat4 axes_translation_helper = glm::mat4(1.0f);
+			axes_translation_helper[3][0] = height*cylinder_axis.x;
+			axes_translation_helper[3][1] = height*cylinder_axis.y;
+			axes_translation_helper[3][2] = height*cylinder_axis.z;
+			bone_mat = axes_translation_helper * bone_mat;
+			axes_pass.setup();
+			CHECK_GL_ERROR(glDrawElements(GL_LINES,
+				axes_mesh.indices.size() * 2,
+				GL_UNSIGNED_INT, 0));
+		}
 
 		// Then draw floor.
 		if (draw_floor) {
