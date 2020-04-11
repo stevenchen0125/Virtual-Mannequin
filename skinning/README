@@ -1,0 +1,79 @@
+Names: Sachin Beldona, Steven Chen
+
+In this project, all of the required features were completed, with some minor
+bugs where some features do not fully work correctly (when compared to the
+reference solution). However, these bugs are relatively minor, and we do meet
+the specification on the assignment page for all of the major points.
+
+We implemented the skeleton forest data structure in a way that seemed
+reasonable to us, and we were able to use it to render the bones correctly. In
+addition, we had no real problems with bone picking and were able to
+successfully transform the mouse position in screen space to a ray in world
+space (with the origin at the eye, and the direction from the eye to the mouse
+coordinates on the near plane). This allowed us to port over the ray tracer
+code, and we were able to successfully detect the mouse pointing at the bones.
+For this, we obviuosly just made the cylinder height the actual axis of the
+bone, and the cylinder radius to be the radius specified in the assignment
+page. With this we were able to get the bone, and drawing the cylinder around
+the bone, we parameterized the mesh sheet given to us and transformed the x and
+z-coordinates to form a circle (leaving y untouched), before using that bones'
+specific transformation matrix (D, U, and T) to move the mesh onto the correct
+bone with the correct orientation.
+
+For our bone manipulation, we made the controls reasonably intuitive, where
+clicking on the bone and dragging it would make it move in that direction, and
+the user can either drag in the direction they want or along the direction of
+the bone to move the bone to the correct orientation. The rollling is where we
+had some slight bugs, as we were keeping track of all of the transformations as
+matrices, and as such the actual floating point error of small changes causes
+some of the bones to start rotating off-axis. This is not a major problem, as
+the bone can be rotated back, but the inherent floating point errors do add
+up over many manipulations, and hence this small bug formed (though it works
+mose of the time, and is very rare to see).
+
+The linear blend skinning is where our other bug occurs, though it is also
+minor. The way that the mesh is defined is confusing, and the specification
+is unclear (as referenced by Piazza posts @322, @324, and @328). As such, we
+have coded a reasonable implementation that does indeed do all of the correct
+things and works in the correct ways, but breaks slightly. For the most part,
+deforming the model works exactly as one expects, where the mesh gets linearly
+interpolated over that bone (and another bone if specified). The minor problem
+occurs when a mesh vertex is weighted where one (or both) of the influencing
+vertices are parents of multiple children in the skeleton forest. In this case,
+it is not clear how the child joints should influence these mesh vertices (and
+note that the child vertices MUST influence the parent orientation, as 
+through trail and error that is how we figured out the format of the mesh
+vertices). In our case, the mesh will 'jump' from one orientation to the other,
+but this is not a big issue to fix, as we can simply reorient the parent bone
+to get the actual mesh vertices into the correct places. Again, as specified
+on Piazza this behaviour does not match the reference solution but is
+reasonable due to the constraints, the lack of specification on the assignment
+page on the format, and the weird nature in the way that the mesh vertices are
+specified.
+
+Note: this project was run and worked on in Windows, and the Windows version
+functions exactly as described above with no obvious issues or any such thing.
+The code also appears to compile and run on the Linux machines, but due to
+remote rendering not being available, we cannot test if the code was actually
+performing correctly on the Linux machines. If there are any questions you
+have or things that you suspect are wrong on the Linux machine, please contact
+us so that we can help fix any issues that might arise.
+
+Therefore, we completed all of the major parts of the project, and with only
+slight bugs and issues (which can also easily be fixed in the GUI to get the
+results that we want), we have the entire project working. Saving the image
+was relatively easy to do, so the bugs mentioned are the only ones and are
+relatively minor/do not effect the actual use of the project in addition to
+them matching the spec. Therefore, we got everything to work, with these minor
+quirks, and implemeted some extra credit by taking the model (bonus.pmd) and
+deforming into some funny/interesting poses. bonus_0.jpeg shows the undeformed
+model (though moved to the front, so she faces the camera). bonus_1.jpeg can
+be interpreted as greeting a friend to her left. bonus_2.jpeg can be seen as
+her drawing her gun. bonus_3.jpeg can be viewed as her falling down. We
+included the raw pmd so that you can see what the undeformed model looks like.
+
+Overall, we implemented all of the required features, with some minor details
+that do not match the reference solution completely (but still work perfectly
+fine). We also included a bonus (bonus.pmd) model, and have some pictures of
+various poses as described above. So we completed all of the required features,
+as well as some bonus.
