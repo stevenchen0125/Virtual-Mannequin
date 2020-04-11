@@ -143,6 +143,8 @@ int main(int argc, char* argv[])
 	 */
 	gui.assignMesh(&mesh);
 
+	gui.pixel_buffer = malloc(window_height * window_width * 3);
+
 	glm::vec4 light_position = glm::vec4(0.0f, 100.0f, 0.0f, 1.0f);
 	MatrixPointers mats; // Define MatrixPointers here for lambda to capture
 
@@ -197,8 +199,10 @@ int main(int argc, char* argv[])
 
 	std::function<std::vector<glm::vec3>()> trans_data = [&mesh](){ return mesh.getCurrentQ()->transData(); };
 	std::function<std::vector<glm::fquat>()> rot_data = [&mesh](){ return mesh.getCurrentQ()->rotData(); };
+	std::function<std::vector<glm::mat4>()> rotation_data = [&mesh]() {return mesh.getCurrentQ()->rotationData();  };
 	auto joint_trans = make_uniform("joint_trans", trans_data);
 	auto joint_rot = make_uniform("joint_rot", rot_data);
+	auto joint_rotation = make_uniform("joint_rotation", rotation_data);
 
 	// FIXME: define more ShaderUniforms for RenderPass if you want to use it.
 	//        Otherwise, do whatever you like here
@@ -246,7 +250,7 @@ int main(int argc, char* argv[])
 			{ std_model, std_view, std_proj,
 			  std_light,
 			  std_camera, object_alpha,
-			  joint_trans, joint_rot
+			  joint_trans, joint_rot, joint_rotation
 			},
 			{ "fragment_color" }
 			);
@@ -324,6 +328,7 @@ int main(int argc, char* argv[])
 #endif
 
 		if (gui.isPoseDirty()) {
+			mesh.updateAllMatrices();
 			mesh.updateAnimation();
 			gui.clearPose();
 		}
@@ -344,14 +349,10 @@ int main(int argc, char* argv[])
 		draw_cylinder = (current_bone != -1 && gui.isTransparent());
 		if (draw_cylinder) {
 			Joint curr_joint = mesh.skeleton.joints[current_bone];
-			glm::vec3 parent_joint_loc = glm::vec3(0, 0, 0);
-			if (curr_joint.parent_index != -1) {
-				parent_joint_loc = mesh.skeleton.joints[curr_joint.parent_index].position;
-			}
-			glm::vec3 beg_pos = curr_joint.position;
-			glm::vec3 end_pos = parent_joint_loc;
-			float height = glm::length(beg_pos - end_pos);
-
+			glm::vec3 beg_pos = curr_joint.wcoord;
+			glm::vec3 end_pos = curr_joint.position;
+			float height = glm::length(end_pos - beg_pos);
+			
 			glm::vec3 cylinder_axis = glm::normalize(end_pos - beg_pos);
 			glm::vec3 y_axis = glm::normalize(glm::vec3(0, 1, 0));
 			auto dot = glm::dot(cylinder_axis, y_axis);
@@ -368,7 +369,7 @@ int main(int argc, char* argv[])
 			else {
 				auto u = cylinder_axis;
 				auto v = glm::normalize(y_axis - dot * cylinder_axis);
-				auto w = glm::normalize(glm::cross(y_axis, cylinder_axis));
+				auto w = glm::normalize(-cross);
 
 				glm::mat3 rotation = glm::mat3(0.0f);
 				rotation[2][2] = 1;
@@ -377,19 +378,15 @@ int main(int argc, char* argv[])
 				rotation[0][1] = mag_cross;
 				rotation[1][0] = -mag_cross;
 
-				glm::mat3 coordinate_change = glm::inverse(glm::mat3(u, v, w));
+				glm::mat3 coordinate_change = glm::mat3(u, v, w);
 
-				change_of_coordinates = glm::inverse(coordinate_change) * rotation * coordinate_change;
+				change_of_coordinates = coordinate_change * rotation * glm::inverse(coordinate_change);
 			}
 			glm::mat4 cylinder_rotation_helper = glm::mat4(1.0f);
 			cylinder_rotation_helper[0][0] = -1;
 			cylinder_rotation_helper[2][2] = -1;
 
 			cylinder_rotation = cylinder_rotation_helper * glm::mat4(change_of_coordinates);
-			/*cylinder_rotation[0][0] = cylinder_rotation[0][0];
-			cylinder_rotation[1][1] = cylinder_rotation[1][1];
-			cylinder_rotation[2][2] = cylinder_rotation[2][2];*/
-
 
 			cylinder_scaling = glm::mat4(1.0f);
 			cylinder_scaling[0][0] = kCylinderRadius;
@@ -409,9 +406,9 @@ int main(int argc, char* argv[])
 				GL_UNSIGNED_INT, 0));
 
 			glm::mat4 axes_translation_helper = glm::mat4(1.0f);
-			axes_translation_helper[3][0] = height*cylinder_axis.x;
-			axes_translation_helper[3][1] = height*cylinder_axis.y;
-			axes_translation_helper[3][2] = height*cylinder_axis.z;
+			//axes_translation_helper[3][0] = height*cylinder_axis.x;
+			//axes_translation_helper[3][1] = height*cylinder_axis.y;
+			//axes_translation_helper[3][2] = height*cylinder_axis.z;
 			bone_mat = axes_translation_helper * bone_mat;
 			axes_pass.setup();
 			CHECK_GL_ERROR(glDrawElements(GL_LINES,
@@ -440,6 +437,8 @@ int main(int argc, char* argv[])
 				CHECK_GL_ERROR(glDrawElements(GL_TRIANGLES, mesh.faces.size() * 3, GL_UNSIGNED_INT, 0));
 #endif
 		}
+
+		CHECK_GL_ERROR(glReadPixels(0, 0, window_width, window_height, GL_RGB, GL_BYTE, gui.pixel_buffer));
 
 		// Poll and swap.
 		glfwPollEvents();

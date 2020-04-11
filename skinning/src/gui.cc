@@ -10,6 +10,9 @@
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/transform.hpp>
 
+
+#include <glm/gtx/string_cast.hpp>
+
 namespace {
 	// FIXME: Implement a function that performs proper
 	//        ray-cylinder intersection detection
@@ -59,6 +62,9 @@ void GUI::keyCallback(int key, int scancode, int action, int mods)
 	}
 	if (key == GLFW_KEY_J && action == GLFW_RELEASE) {
 		//FIXME save out a screenshot using SaveJPEG
+		std::cout << "Saving to capture.jpeg..." << std::endl;
+		SaveJPEG("capture.jpeg", view_width_, view_height_, (const unsigned char*)pixel_buffer);
+		std::cout << "File saved!" << std::endl;
 	}
 	if (key == GLFW_KEY_S && (mods & GLFW_MOD_CONTROL)) {
 		if (action == GLFW_RELEASE)
@@ -75,6 +81,25 @@ void GUI::keyCallback(int key, int scancode, int action, int mods)
 		else
 			roll_speed = roll_speed_;
 		// FIXME: actually roll the bone here
+		if (current_bone_ != -1) {
+			Joint curr_joint = mesh_->skeleton.joints[current_bone_];
+			glm::vec3 parent_joint_loc;
+			if (curr_joint.parent_index == -1) {
+				parent_joint_loc = glm::vec3(0, 0, 0);
+			}
+			else {
+				parent_joint_loc = mesh_->skeleton.joints[curr_joint.parent_index].position;
+			}
+			/*glm::vec3 beg_pos = curr_joint.position;
+			glm::vec3 end_pos = parent_joint_loc;*/
+			glm::vec3 beg_pos = parent_joint_loc;
+			glm::vec3 end_pos = curr_joint.position;
+
+			glm::vec3 cylinder_axis = glm::normalize(end_pos - beg_pos);
+			glm::mat4 rotation_matrix = glm::rotate(roll_speed, cylinder_axis);
+			updateAllTransformations(current_bone_, rotation_matrix, true);
+			pose_changed_ = true;
+		}
 	} else if (key == GLFW_KEY_C && action != GLFW_RELEASE) {
 		fps_mode_ = !fps_mode_;
 	} else if (key == GLFW_KEY_LEFT_BRACKET && action == GLFW_RELEASE) {
@@ -92,6 +117,100 @@ void GUI::keyCallback(int key, int scancode, int action, int mods)
 	// FIXME: implement other controls here.
 }
 
+//void GUI::updateAllParentsOrientation(int curr)
+//{
+//	Joint* curr_joint = &(mesh_->skeleton.joints[curr]);
+//	if (curr_joint->parent_index == -1) {
+//		return;
+//	}
+//	else {
+//		Joint* parent_joint = &(mesh_->skeleton.joints[curr_joint->parent_index]);
+//		glm::mat4 extract_translation = glm::mat4(0.0f);
+//		extract_translation[3] = -((curr_joint->D * glm::inverse(curr_joint->U))[3]);
+//		extract_translation[3][3] = 0;
+//		parent_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
+//		updateAllParentsOrientation(curr_joint->parent_index);
+//	}
+//}
+
+void GUI::updateAllTransformations(int curr_bone, glm::mat4 updateT, bool use_update)
+{
+	Joint* curr_joint = &mesh_->skeleton.joints[curr_bone];
+	int parent_index = curr_joint->parent_index;
+	Joint* parent_joint;
+	
+	if (use_update) {
+		//std::cerr << curr_bone << std::endl;
+		if (parent_index == -1) {
+			curr_joint->T = updateT * curr_joint->T;
+
+			//curr_joint->orientation = glm::quat_cast(updateT * glm::mat4(curr_joint->orientation));
+			/*curr_joint->skinning_T = updateT * curr_joint->skinning_T;*/
+		}
+		/*curr_joint->passed_up_T = updateT * curr_joint->passed_up_T;*/
+		else {
+			parent_joint = &mesh_->skeleton.joints[parent_index];
+			/*parent_joint->skinning_T = updateT * parent_joint->skinning_T;
+			parent_joint->skinning_D = mesh_->calculateSkinningD(parent_index);*/
+			curr_joint->T = updateT * curr_joint->T;
+			//curr_joint->orientation = glm::quat_cast(updateT * glm::mat4(curr_joint->orientation));
+		}
+	}
+	if (parent_index != -1) {
+		parent_joint = &mesh_->skeleton.joints[parent_index];
+		curr_joint->D = mesh_->calculateD(curr_bone);
+		//parent_joint->D = mesh_->calculateD(curr_bone);
+		curr_joint->position = glm::vec3(curr_joint->D * glm::inverse(curr_joint->U) * glm::vec4(curr_joint->init_position, 1));
+		curr_joint->wcoord = glm::vec3(curr_joint->D * glm::inverse(curr_joint->U) * glm::vec4(curr_joint->init_wcoord, 1));
+		/*curr_joint->skinning_D = mesh_->calculateSkinningD(curr_bone);
+		curr_joint->skinning_position = glm::vec3(curr_joint->skinning_D * glm::inverse(curr_joint->skinning_U) * glm::vec4(curr_joint->init_position, 1));*/
+		//std::cerr << "Correct position: " << glm::to_string(curr_joint->position) << ", other position: " << glm::to_string(curr_joint->skinning_position) << std::endl;
+		//curr_joint->position = glm::vec3(curr_joint->skinning_D * glm::inverse(curr_joint->skinning_U) * glm::vec4(curr_joint->init_position, 1));
+		glm::mat4 extract_translation = glm::mat4(0.0f);
+		extract_translation[3] = -((curr_joint->D * glm::inverse(curr_joint->U))[3]);
+		//extract_translation[3] = -((parent_joint->D * glm::inverse(parent_joint->U))[3]);
+		extract_translation[3][3] = 0;
+		/*curr_joint->orientation = glm::quat_cast(curr_joint->skinning_D * glm::inverse(curr_joint->skinning_U) + extract_translation);*/
+		//curr_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
+		if (use_update || true) {
+			//updateAllParentsOrientation(current_bone_);
+			/*extract_translation[3] = -((curr_joint->D * glm::inverse(curr_joint->U))[3]);
+			extract_translation[3][3] = 0;*/
+			/*parent_joint->orientation = glm::quat_cast(parent_joint->skinning_D * glm::inverse(parent_joint->skinning_U) + extract_translation);*/
+			//parent_joint->D = curr_joint->D;
+			//parent_joint->U = curr_joint->U;
+			parent_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
+			//std::cerr << "Parent: " << glm::to_string(parent_joint->orientation) << " - " << glm::length(parent_joint->orientation) << std::endl;
+			//parent_joint->orientation = glm::quat_cast(mesh_->calculateD(parent_index, curr_joint->passed_up_T) * glm::inverse(parent_joint->skinning_U) + extract_translation);
+		}
+		//curr_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U));
+		//std::cerr << glm::to_string(curr_joint->position) << std::endl;
+		//std::cerr << glm::to_string(curr_joint->orientation) << std::endl;
+		//std::cerr << glm::to_string(curr_joint->D) << " \ncompared to\n " << glm::to_string(curr_joint->skinning_D) << std::endl << std::endl;
+		/*parent_joint->D = mesh_->calculateD(parent_index, parent_joint->passed_up_T);
+		parent_joint->position = glm::vec3(parent_joint->D * glm::inverse(parent_joint->U) * glm::vec4(parent_joint->init_position, 1));
+		parent_joint->orientation = glm::quat_cast(updateT * parent_joint->passed_up_T);*/
+	}
+	else {
+		curr_joint->D = mesh_->calculateD(curr_bone);
+		/*curr_joint->position = curr_joint->T * glm::vec4(curr_joint->init_position, 1);*/
+		curr_joint->position = glm::vec3(curr_joint->D * glm::inverse(curr_joint->U) * glm::vec4(curr_joint->init_position, 1));
+		curr_joint->wcoord = glm::vec3(curr_joint->D * glm::inverse(curr_joint->U) * glm::vec4(curr_joint->init_wcoord, 1));
+		glm::mat4 extract_translation = glm::mat4(0.0f);
+		extract_translation[3] = -((curr_joint->D * glm::inverse(curr_joint->U))[3]);
+		extract_translation[3][3] = 0;
+		//curr_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
+		//curr_joint->orientation = glm::quat_cast(curr_joint->T);
+		/*curr_joint->orientation = glm::quat_cast(curr_joint->skinning_D * glm::inverse(curr_joint->skinning_U) + extract_translation);*/
+		curr_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
+	}
+	for (auto child : curr_joint->children)
+	{
+		updateAllTransformations(child, glm::mat4(1.0f), false);
+	}
+	//std::cout << "Bone: " << curr_bone << ", Beginning: " << glm::to_string(curr_joint->wcoord) << ", End: " << glm::to_string(curr_joint->position) << std::endl;
+}
+
 int GUI::intersectCylinder(glm::vec3 direction, glm::vec3 position)
 {
 	double best_t = 1e6;
@@ -107,11 +226,15 @@ int GUI::intersectCylinder(glm::vec3 direction, glm::vec3 position)
 		else {
 			parent_joint_loc = mesh_->skeleton.joints[curr_joint.parent_index].position;
 		}
-		glm::vec3 beg_pos = curr_joint.position;
-		glm::vec3 end_pos = parent_joint_loc;
 
-		glm::vec3 cylinder_axis = glm::normalize(beg_pos - end_pos);
-		auto height = glm::length(beg_pos - end_pos);
+
+		glm::vec3 beg_pos = parent_joint_loc;
+		glm::vec3 end_pos = curr_joint.position;
+
+		/*glm::vec3 cylinder_axis = glm::normalize(beg_pos - end_pos);*/
+		glm::vec3 cylinder_axis = glm::normalize(end_pos - beg_pos);
+		/*auto height = glm::length(beg_pos - end_pos);*/
+		auto height = glm::length(end_pos - beg_pos);
 		glm::vec3 z_axis = glm::normalize(glm::vec3(0, 0, 1));
 		auto dot = glm::dot(cylinder_axis, z_axis);
 		auto cross = glm::cross(cylinder_axis, z_axis);
@@ -126,7 +249,7 @@ int GUI::intersectCylinder(glm::vec3 direction, glm::vec3 position)
 		else {
 			auto u = cylinder_axis;
 			auto v = glm::normalize(z_axis - dot * cylinder_axis);
-			auto w = glm::normalize(glm::cross(z_axis, cylinder_axis));
+			auto w = glm::normalize(-cross);
 
 			glm::mat3 rotation = glm::mat3(0.0f);
 			rotation[2][2] = 1;
@@ -135,13 +258,13 @@ int GUI::intersectCylinder(glm::vec3 direction, glm::vec3 position)
 			rotation[0][1] = mag_cross;
 			rotation[1][0] = -mag_cross;
 
-			glm::mat3 coordinate_change = glm::inverse(glm::mat3(u, v, w));
+			glm::mat3 coordinate_change = glm::mat3(u, v, w);
 
-			change_of_coordinates = glm::inverse(coordinate_change) * rotation * coordinate_change;
+			change_of_coordinates = coordinate_change * rotation * glm::inverse(coordinate_change);
 		}
 
 		glm::vec3 changed_direction = glm::normalize(change_of_coordinates * direction);
-		glm::vec3 changed_position = change_of_coordinates * (position-end_pos);
+		glm::vec3 changed_position = change_of_coordinates * (position-beg_pos);
 		auto vx = changed_direction.x;
 		auto vy = changed_direction.y;
 		auto px = changed_position.x;
@@ -192,6 +315,17 @@ void GUI::mousePosCallback(double mouse_x, double mouse_y)
 	bool drag_camera = drag_state_ && current_button_ == GLFW_MOUSE_BUTTON_RIGHT;
 	bool drag_bone = drag_state_ && current_button_ == GLFW_MOUSE_BUTTON_LEFT;
 
+	glm::vec3 current_mouse_position = (glm::unProject(glm::vec3(current_x_, current_y_, -1), view_matrix_ * model_matrix_, projection_matrix_, viewport));
+	glm::vec3 previous_mouse_position = (glm::unProject(glm::vec3(last_x_, last_y_, -1), view_matrix_ * model_matrix_, projection_matrix_, viewport));
+	glm::vec3 mouse_ray = glm::normalize(current_mouse_position - eye_);
+	glm::vec3 mouse_world_direction = glm::normalize(current_mouse_position - previous_mouse_position);
+	int intersection_index = intersectCylinder(mouse_ray, eye_);
+
+	current_bone_ = intersection_index;
+	if (current_bone_ != -1) {
+		/*std::cerr << current_bone_ << std::endl;*/
+	}
+
 	if (drag_camera) {
 		glm::vec3 axis = glm::normalize(
 				orientation_ *
@@ -204,15 +338,32 @@ void GUI::mousePosCallback(double mouse_x, double mouse_y)
 		look_ = glm::column(orientation_, 2);
 	} else if (drag_bone && current_bone_ != -1) {
 		// FIXME: Handle bone rotation
+		glm::vec3 axis = glm::normalize(
+			orientation_ *
+			glm::vec3(mouse_direction.y, -mouse_direction.x, 0.0f)
+		);
+
+		Joint curr_joint = mesh_->skeleton.joints[current_bone_];
+		glm::vec3 end_pos = curr_joint.position;
+		glm::vec3 beg_pos = curr_joint.wcoord;
+
+		glm::vec3 cylinder_axis = glm::normalize(beg_pos - end_pos);
+		
+		glm::vec3 mouse_cross = glm::cross(mouse_world_direction, cylinder_axis);
+		glm::vec3 look_cross = glm::cross(look_, cylinder_axis);
+		glm::vec3 tan_cross = glm::cross(tangent_, cylinder_axis);
+		bool use_look = std::abs(glm::dot(mouse_cross, look_)) > std::abs(glm::dot(mouse_cross, tangent_));
+		auto rotation_amount = glm::dot(glm::normalize(mouse_cross), use_look ? look_ : -tangent_) * rotation_speed_;
+		if (std::abs(rotation_amount) < 1e-6) {
+			return;
+		}
+		glm::mat4 rotation_matrix = glm::rotate(rotation_amount, look_);
+		updateAllTransformations(current_bone_, rotation_matrix, true);	
+		pose_changed_ = true;
 		return ;
 	}
 
-	glm::vec3 temp = (glm::unProject(glm::vec3(current_x_, current_y_, -1), view_matrix_ * model_matrix_, projection_matrix_, viewport));
-	glm::vec3 mouse_ray = glm::normalize(temp - eye_);
-	int intersection_index = intersectCylinder(mouse_ray, eye_);
-
 	// FIXME: highlight bones that have been moused over
-	current_bone_ = intersection_index;
 }
 
 void GUI::mouseButtonCallback(int button, int action, int mods)

@@ -46,6 +46,8 @@ public:
 	bool isPlaying() const { return play_; }
 	float getCurrentPlayTime() const;
 
+	void* pixel_buffer;
+
 private:
 	GLFWwindow* window_;
 	Mesh* mesh_;
@@ -85,6 +87,7 @@ private:
 	bool play_ = false;
 
 	int intersectCylinder(glm::vec3 direction, glm::vec3 position);
+	void updateAllTransformations(int curr_bone, glm::mat4 updateT, bool use_update);
 };
 
 #endif

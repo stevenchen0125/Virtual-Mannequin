@@ -39,24 +39,37 @@ struct Joint {
 
 	int joint_index;
 	int parent_index;
+	glm::vec3 wcoord;
+	glm::vec3 init_wcoord;
 	glm::vec3 position;             // position of the joint
 	glm::fquat orientation;         // rotation w.r.t. initial configuration
 	glm::fquat rel_orientation;     // rotation w.r.t. it's parent. Used for animation.
 	glm::vec3 init_position;        // initial position of this joint
 	glm::vec3 init_rel_position;    // initial relative position to its parent
 	std::vector<int> children;
+	bool is_root;
 
+	//Maybe use orientation and rel_orientation instead of T to fix weird rolling issues
 	glm::mat4 T;
 	glm::mat4 D;
 	glm::mat4 U;
+	glm::mat4 total_roll;
+	//glm::mat4 passed_up_T;
+
+	//glm::mat4 skinning_T;
+	//glm::mat4 skinning_D;
+	//glm::mat4 skinning_U;
+	//glm::vec3 skinning_position;
 };
 
 struct Configuration {
 	std::vector<glm::vec3> trans;
 	std::vector<glm::fquat> rot;
+	std::vector<glm::mat4> rotations;
 
 	const auto& transData() const { return trans; }
 	const auto& rotData() const { return rot; }
+	const auto& rotationData() const { return rotations; }
 };
 
 struct KeyFrame {
@@ -83,6 +96,7 @@ struct Skeleton {
 	const glm::fquat* collectJointRot() const;
 
 	// FIXME: create skeleton and bone data structures
+	const glm::mat4* collectJointRotations() const;
 };
 
 struct Mesh {
@@ -114,6 +128,15 @@ struct Mesh {
 
 	void saveAnimationTo(const std::string& fn);
 	void loadAnimationFrom(const std::string& fn);
+
+	glm::mat4 calculateU(int id);
+	glm::mat4 calculateD(int id);
+
+	/*glm::mat4 calculateSkinningU(int id);
+	glm::mat4 calculateSkinningD(int id);*/
+
+	void updateAllMatrices();
+	void updateAllRotations();
 
 private:
 	void computeBounds();
