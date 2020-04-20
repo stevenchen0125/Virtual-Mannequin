@@ -10,17 +10,14 @@
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/transform.hpp>
 
-
-#include <glm/gtx/string_cast.hpp>
-
 namespace {
 	// FIXME: Implement a function that performs proper
 	//        ray-cylinder intersection detection
 	// TIPS: The implement is provided by the ray-tracer starter code.
 }
 
-GUI::GUI(GLFWwindow* window, int view_width, int view_height, int preview_height)
-	:window_(window), preview_height_(preview_height)
+GUI::GUI(GLFWwindow* window, int view_width, int view_height, int preview_height, int preview_width)
+	:window_(window), preview_height_(preview_height), preview_width_(preview_width)
 {
 	glfwSetWindowUserPointer(window_, this);
 	glfwSetKeyCallback(window_, KeyCallback);
@@ -113,32 +110,103 @@ void GUI::keyCallback(int key, int scancode, int action, int mods)
 	} else if (key == GLFW_KEY_T && action != GLFW_RELEASE) {
 		transparent_ = !transparent_;
 	}
+	else if (key == GLFW_KEY_F && action == GLFW_RELEASE) {
+		//std::cerr << "F" << std::endl;
+		mesh_->addKeyframe();
+		Keyframe* keyframe = mesh_->getLastKeyFrame();
+		keyframe->texture.create(preview_width_, preview_height_);
+		texture_to_render = &(keyframe->texture);
+		/*keyframe->texture.bind();
+		CHECK_GL_ERROR(glClear(GL_DEPTH_BUFFER_BIT));
+		keyframe->texture.unbind();*/
+	}
+	else if (key == GLFW_KEY_R && action == GLFW_RELEASE) {
+		//std::cerr << "R" << std::endl;
+		mesh_->setPoseFromKeyframe(0);
+		start = std::chrono::system_clock::now();
+		curr_time = std::chrono::system_clock::now();
+		reset_ = true;
+		pose_changed_ = true;
+		pause_dur = curr_time - start;
+	}
+	else if (key == GLFW_KEY_P && action == GLFW_RELEASE) {
+		//std::cerr << "P: ";
+		if (!play_ && reset_) {
+			start = std::chrono::system_clock::now();
+			play_ = true;
+			//std::cerr << "playing!" << std::endl;
+			reset_ = false;
+		}
+		else if (!play_) {
+			curr_time = std::chrono::system_clock::now();
+			pause_dur += (curr_time - pause_start);
+			//std::cerr << "playing!" << std::endl;
+			//std::cerr << pause_dur.count() << std::endl;
+			play_ = true;
+		}
+		else if (play_) {
+			pause_start = std::chrono::system_clock::now();
+			//std::cerr << "pausing!" << std::endl;
+			play_ = false;
+			reset_ = false;
+		}
+		pose_changed_ = true;
+	}
+	else if (key == GLFW_KEY_PAGE_UP && action == GLFW_RELEASE) {
+		selected_keyframe -= 1;
+		if (selected_keyframe < 0) {
+			selected_keyframe = 0;
+		}
+		if (mesh_->keyframes.size() == 0) {
+			selected_keyframe = -1;
+		}
+	}
+	else if (key == GLFW_KEY_PAGE_DOWN && action == GLFW_RELEASE) {
+		selected_keyframe += 1;
+		if (selected_keyframe >= (int)(mesh_->keyframes.size())) {
+			selected_keyframe = (int)(mesh_->keyframes.size()-1);
+		}
+		if (mesh_->keyframes.size() == 0) {
+			selected_keyframe = -1;
+		}
+	}
+	else if (key == GLFW_KEY_SPACE && action == GLFW_RELEASE) {
+		if (selected_keyframe != -1 && !play_) {
+			mesh_->setPoseFromKeyframe(selected_keyframe);
+			pose_changed_ = true;
+		}
+	}
+	else if (key == GLFW_KEY_U && action == GLFW_RELEASE) {
+		if (selected_keyframe != -1 && !play_) {
+			mesh_->updateKeyframe(selected_keyframe);
+			Keyframe* keyframe = mesh_->keyframes[selected_keyframe];
+			keyframe->texture.~TextureToRender();
+			keyframe->texture.create(preview_width_, preview_height_);
+			texture_to_render = &(keyframe->texture);
+			pose_changed_ = true;
+		}
+	}
+	else if (key == GLFW_KEY_DELETE && action == GLFW_RELEASE) {
+		if (selected_keyframe != -1 && !play_) {
+			mesh_->deleteKeyframe(selected_keyframe);
+			selected_keyframe = -1;
+			/*Keyframe* keyframe = mesh_->keyframes[selected_keyframe];
+			keyframe->texture.~TextureToRender();
+			keyframe->texture.create(preview_width_, preview_height_);
+			texture_to_render = &(keyframe->texture);*/
+			pose_changed_ = true;
+		}
+	}
 
 	// FIXME: implement other controls here.
 }
-
-//void GUI::updateAllParentsOrientation(int curr)
-//{
-//	Joint* curr_joint = &(mesh_->skeleton.joints[curr]);
-//	if (curr_joint->parent_index == -1) {
-//		return;
-//	}
-//	else {
-//		Joint* parent_joint = &(mesh_->skeleton.joints[curr_joint->parent_index]);
-//		glm::mat4 extract_translation = glm::mat4(0.0f);
-//		extract_translation[3] = -((curr_joint->D * glm::inverse(curr_joint->U))[3]);
-//		extract_translation[3][3] = 0;
-//		parent_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
-//		updateAllParentsOrientation(curr_joint->parent_index);
-//	}
-//}
 
 void GUI::updateAllTransformations(int curr_bone, glm::mat4 updateT, bool use_update)
 {
 	Joint* curr_joint = &mesh_->skeleton.joints[curr_bone];
 	int parent_index = curr_joint->parent_index;
 	Joint* parent_joint;
-	
+
 	if (use_update) {
 		//std::cerr << curr_bone << std::endl;
 		if (parent_index == -1) {
@@ -179,7 +247,9 @@ void GUI::updateAllTransformations(int curr_bone, glm::mat4 updateT, bool use_up
 			/*parent_joint->orientation = glm::quat_cast(parent_joint->skinning_D * glm::inverse(parent_joint->skinning_U) + extract_translation);*/
 			//parent_joint->D = curr_joint->D;
 			//parent_joint->U = curr_joint->U;
-			parent_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
+			curr_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
+			curr_joint->rel_orientation = glm::quat_cast(curr_joint->T);
+			//parent_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
 			//std::cerr << "Parent: " << glm::to_string(parent_joint->orientation) << " - " << glm::length(parent_joint->orientation) << std::endl;
 			//parent_joint->orientation = glm::quat_cast(mesh_->calculateD(parent_index, curr_joint->passed_up_T) * glm::inverse(parent_joint->skinning_U) + extract_translation);
 		}
@@ -221,7 +291,7 @@ int GUI::intersectCylinder(glm::vec3 direction, glm::vec3 position)
 		Joint curr_joint = mesh_->skeleton.joints[i];
 		glm::vec3 parent_joint_loc;
 		if (curr_joint.parent_index == -1) {
-			parent_joint_loc = glm::vec3(0,0,0);
+			parent_joint_loc = glm::vec3(0, 0, 0);
 		}
 		else {
 			parent_joint_loc = mesh_->skeleton.joints[curr_joint.parent_index].position;
@@ -264,19 +334,19 @@ int GUI::intersectCylinder(glm::vec3 direction, glm::vec3 position)
 		}
 
 		glm::vec3 changed_direction = glm::normalize(change_of_coordinates * direction);
-		glm::vec3 changed_position = change_of_coordinates * (position-beg_pos);
+		glm::vec3 changed_position = change_of_coordinates * (position - beg_pos);
 		auto vx = changed_direction.x;
 		auto vy = changed_direction.y;
 		auto px = changed_position.x;
 		auto py = changed_position.y;
-		auto a = vx*vx+vy*vy;
-		auto b = 2*(px*vx+py*vy);
+		auto a = vx * vx + vy * vy;
+		auto b = 2 * (px * vx + py * vy);
 		auto c = px * px + py * py - kCylinderRadius * kCylinderRadius;
 
 		if (a == 0) {
 			continue;
 		}
-		auto discriminant = b*b-4*a*c;
+		auto discriminant = b * b - 4 * a * c;
 		if (discriminant < 0) {
 			continue;
 		}
@@ -299,14 +369,14 @@ void GUI::mousePosCallback(double mouse_x, double mouse_y)
 {
 	last_x_ = current_x_;
 	last_y_ = current_y_;
-	current_x_ = (float)mouse_x;
-	current_y_ = window_height_ - (float)mouse_y;
+	current_x_ = mouse_x;
+	current_y_ = window_height_ - mouse_y;
 	float delta_x = current_x_ - last_x_;
 	float delta_y = current_y_ - last_y_;
 	if (sqrt(delta_x * delta_x + delta_y * delta_y) < 1e-15)
 		return;
-	/*if (mouse_x > view_width_)
-		return ;*/
+	if (mouse_x > view_width_)
+		return;
 	glm::vec3 mouse_direction = glm::normalize(glm::vec3(delta_x, delta_y, 0.0f));
 	glm::vec2 mouse_start = glm::vec2(last_x_, last_y_);
 	glm::vec2 mouse_end = glm::vec2(current_x_, current_y_);
@@ -323,7 +393,7 @@ void GUI::mousePosCallback(double mouse_x, double mouse_y)
 
 	current_bone_ = intersection_index;
 	if (current_bone_ != -1) {
-		/*std::cerr << current_bone_ << std::endl;*/
+		//std::cerr << current_bone_ << std::endl;
 	}
 
 	if (drag_camera) {
@@ -348,7 +418,7 @@ void GUI::mousePosCallback(double mouse_x, double mouse_y)
 		glm::vec3 beg_pos = curr_joint.wcoord;
 
 		glm::vec3 cylinder_axis = glm::normalize(beg_pos - end_pos);
-		
+
 		glm::vec3 mouse_cross = glm::cross(mouse_world_direction, cylinder_axis);
 		glm::vec3 look_cross = glm::cross(look_, cylinder_axis);
 		glm::vec3 tan_cross = glm::cross(tangent_, cylinder_axis);
@@ -358,7 +428,7 @@ void GUI::mousePosCallback(double mouse_x, double mouse_y)
 			return;
 		}
 		glm::mat4 rotation_matrix = glm::rotate(rotation_amount, look_);
-		updateAllTransformations(current_bone_, rotation_matrix, true);	
+		updateAllTransformations(current_bone_, rotation_matrix, true);
 		pose_changed_ = true;
 		return ;
 	}
@@ -373,7 +443,20 @@ void GUI::mouseButtonCallback(int button, int action, int mods)
 		current_button_ = button;
 		return ;
 	}
+	else
+	{
+		//drag_state_ = (action == GLFW_PRESS);
+		current_button_ = button;
+	}
 	// FIXME: Key Frame Selection
+	if (current_button_ == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) {
+		/*std::cerr << "Left click at: " << current_x_ << ", " << current_y_ << " with current scroll: " << current_scroll  << " frame: " << 
+			(view_height_ - current_y_ - current_scroll)/preview_height_<< std::endl;*/
+		int attempted_keyframe = (view_height_ - current_y_ - current_scroll) / preview_height_;
+		if (attempted_keyframe >= 0 && attempted_keyframe < (int)(mesh_->keyframes.size())) {
+			selected_keyframe = attempted_keyframe;
+		}
+	}
 }
 
 void GUI::mouseScrollCallback(double dx, double dy)
@@ -381,6 +464,17 @@ void GUI::mouseScrollCallback(double dx, double dy)
 	if (current_x_ < view_width_)
 		return;
 	// FIXME: Mouse Scrolling
+	if (mesh_->keyframes.size() == 0) {
+		current_scroll = 0;
+		return;
+	}
+	current_scroll += (int)(scroll_speed * dy);
+	if (current_scroll > 0) {
+		current_scroll = 0;
+	}
+	if (current_scroll < -(int)(mesh_->keyframes.size()-1) * preview_height_) {
+		current_scroll = -(int)(mesh_->keyframes.size()-1) * preview_height_;
+	}
 }
 
 void GUI::updateMatrices()
@@ -419,7 +513,13 @@ bool GUI::setCurrentBone(int i)
 
 float GUI::getCurrentPlayTime() const
 {
-	return 0.0f;
+	std::chrono::duration<float> dur;
+	std::chrono::time_point<std::chrono::system_clock> curr = std::chrono::system_clock::now();
+	dur = curr - start;
+	if (!play_) {
+		return 0.0f;
+	}
+	return dur.count()-pause_dur.count();
 }
 
 

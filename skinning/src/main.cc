@@ -5,11 +5,14 @@
 #include "render_pass.h"
 #include "config.h"
 #include "gui.h"
+#include "texture_to_render.h"
 
+#include <memory>
 #include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <sstream>
 #include <vector>
 
 #include <glm/gtx/component_wise.hpp>
@@ -18,8 +21,15 @@
 #include <glm/gtx/io.hpp>
 #include <debuggl.h>
 
-int window_width = 800, window_height = 600;
-const std::string window_title = "Skinning";
+int window_width = 1280;
+int window_height = 720;
+int main_view_width = 960;
+int main_view_height = 720;
+int preview_width = window_width - main_view_width; // 320
+int preview_height = preview_width / 4 * 3; // 320 / 4 * 3 = 240
+int preview_bar_width = preview_width;
+int preview_bar_height = main_view_height;
+const std::string window_title = "Animation";
 
 const char* vertex_shader =
 #include "shaders/default.vert"
@@ -66,18 +76,16 @@ const char* axes_fragment_shader =
 #include "shaders/axes.frag"
 ;
 
+const char* preview_vertex_shader =
+#include "shaders/preview.vert"
+;
+
+const char* preview_fragment_shader =
+#include "shaders/preview.frag"
+;
+
 void ErrorCallback(int error, const char* description) {
 	std::cerr << "GLFW Error: " << description << "\n";
-}
-
-void printVec3(glm::vec3 vec)
-{
-	std::cout << vec.x << ", " << vec.y << ", " << vec.z << ", " << std::endl;
-}
-
-void printVec4(glm::vec4 vec)
-{
-	std::cout << vec.x << ", " << vec.y << ", " << vec.z << ", " << vec.w << std::endl;
 }
 
 GLFWwindow* init_glefw()
@@ -85,10 +93,11 @@ GLFWwindow* init_glefw()
 	if (!glfwInit())
 		exit(EXIT_FAILURE);
 	glfwSetErrorCallback(ErrorCallback);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE); // Disable resizing, for simplicity
 	glfwWindowHint(GLFW_SAMPLES, 4);
 	auto ret = glfwCreateWindow(window_width, window_height, window_title.data(), nullptr, nullptr);
 	CHECK_SUCCESS(ret != nullptr);
@@ -113,7 +122,7 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 	GLFWwindow *window = init_glefw();
-	GUI gui(window);
+	GUI gui(window, main_view_width, main_view_height, preview_height, preview_width);
 
 	std::vector<glm::vec4> floor_vertices;
 	std::vector<glm::uvec3> floor_faces;
@@ -143,11 +152,12 @@ int main(int argc, char* argv[])
 	 */
 	gui.assignMesh(&mesh);
 
-	gui.pixel_buffer = malloc(window_height * window_width * 3);
+	gui.pixel_buffer = malloc(main_view_height * main_view_width * 3);
+	mesh.keyframes.clear();
 
 	glm::vec4 light_position = glm::vec4(0.0f, 100.0f, 0.0f, 1.0f);
-	MatrixPointers mats; // Define MatrixPointers here for lambda to capture
 
+	MatrixPointers mats; // Define MatrixPointers here for lambda to capture
 	/*
 	 * In the following we are going to define several lambda functions as
 	 * the data source of GLSL uniforms
@@ -199,11 +209,6 @@ int main(int argc, char* argv[])
 
 	std::function<std::vector<glm::vec3>()> trans_data = [&mesh](){ return mesh.getCurrentQ()->transData(); };
 	std::function<std::vector<glm::fquat>()> rot_data = [&mesh](){ return mesh.getCurrentQ()->rotData(); };
-	std::function<std::vector<glm::mat4>()> rotation_data = [&mesh]() {return mesh.getCurrentQ()->rotationData();  };
-	auto joint_trans = make_uniform("joint_trans", trans_data);
-	auto joint_rot = make_uniform("joint_rot", rot_data);
-	auto joint_rotation = make_uniform("joint_rotation", rotation_data);
-
 	// FIXME: define more ShaderUniforms for RenderPass if you want to use it.
 	//        Otherwise, do whatever you like here
 	glm::mat4 cylinder_rotation;
@@ -212,6 +217,62 @@ int main(int argc, char* argv[])
 	glm::mat4 bone_mat = glm::mat4(1.0f);
 	std::function<glm::mat4()> cylinder_data = [&bone_mat]() {return bone_mat; };
 	auto bone_transform = make_uniform("bone_transform", cylinder_data);
+
+
+	//
+	glm::mat4 ortho_mat = glm::mat4(1.0f);
+	float preview_frame_shift = 0.0f;
+	bool preview_show_border = false;
+	std::vector<glm::vec4> preview_vertices;
+	std::vector<glm::uvec3> preview_faces;
+	std::vector<glm::vec2> preview_uv;
+	//
+	std::function<glm::mat4()> ortho_data = [&ortho_mat]() {return ortho_mat; };
+	std::function<float()> frame_shift_data = [&preview_frame_shift]() {return preview_frame_shift; };
+	std::function<bool()> show_border_data = [&preview_show_border]() {return preview_show_border; };
+	auto joint_trans = make_uniform("joint_trans", trans_data);
+	auto joint_rot = make_uniform("joint_rot", rot_data);
+	auto orthomat = make_uniform("orthomat", ortho_data);
+	auto frame_shift = make_uniform("frame_shift", frame_shift_data);
+	auto show_border = make_uniform("show_border", show_border_data);
+	
+	/*static const GLfloat g_quad_vertex_buffer_data[] = {
+		-1.0f, -1.0f, 0.0f,
+		1.0f, -1.0f, 0.0f,
+		-1.0f,  1.0f, 0.0f,
+		-1.0f,  1.0f, 0.0f,
+		1.0f, -1.0f, 0.0f,
+		1.0f,  1.0f, 0.0f,
+	};*/
+	preview_vertices.clear();
+	preview_vertices.push_back(glm::vec4(-1, -1, 0, 1));
+	preview_vertices.push_back(glm::vec4(1, -1, 0, 1));
+	preview_vertices.push_back(glm::vec4(-1, 1, 0, 1));
+	preview_vertices.push_back(glm::vec4(1, 1, 0, 1));
+
+	preview_faces.clear();
+	preview_faces.push_back(glm::uvec3(0, 1, 2));
+	//preview_faces.push_back(glm::uvec3(1,2,3));
+	//preview_faces.push_back(glm::uvec3(0, 1, 3));
+	preview_faces.push_back(glm::uvec3(1, 3, 2));
+
+	preview_uv.clear();
+	preview_uv.push_back(glm::vec2(0,0));
+	preview_uv.push_back(glm::vec2(1,0));
+	preview_uv.push_back(glm::vec2(0,1));
+	preview_uv.push_back(glm::vec2(1,1));
+
+	RenderDataInput preview_pass_input;
+	preview_pass_input.assign(0, "vertex_position", preview_vertices.data(), preview_vertices.size(), 4, GL_FLOAT);
+	preview_pass_input.assign(1, "tex_coord_in", preview_uv.data(), preview_uv.size(), 2, GL_FLOAT);
+	preview_pass_input.assignIndex(preview_faces.data(), preview_faces.size(), 3);
+	RenderPass preview_pass(-1,
+		preview_pass_input,
+		{ preview_vertex_shader, nullptr, preview_fragment_shader },
+		{ orthomat, frame_shift, show_border },
+		{ "fragment_color" }
+	);
+	preview_pass.setup();
 
 	// Floor render pass
 	RenderDataInput floor_pass_input;
@@ -250,7 +311,7 @@ int main(int argc, char* argv[])
 			{ std_model, std_view, std_proj,
 			  std_light,
 			  std_camera, object_alpha,
-			  joint_trans, joint_rot, joint_rotation
+			  joint_trans, joint_rot
 			},
 			{ "fragment_color" }
 			);
@@ -278,7 +339,7 @@ int main(int argc, char* argv[])
 			);
 
 	// FIXME: Create the RenderPass objects for bones here.
-	//        Otherwise do whatever you like.
+	//        or do whatever you like.
 	RenderDataInput cylinder_pass_input;
 	cylinder_pass_input.assign(0, "vertex_position", cylinder_mesh.vertices.data(), cylinder_mesh.vertices.size(), 4, GL_FLOAT);
 	cylinder_pass_input.assignIndex(cylinder_mesh.indices.data(), cylinder_mesh.indices.size(), 2);
@@ -286,7 +347,7 @@ int main(int argc, char* argv[])
 		{ cylinder_vertex_shader, nullptr, cylinder_fragment_shader },
 		{ bone_transform, std_model, std_view, std_proj },
 		{ "fragment_color" }
-		);
+	);
 
 	RenderDataInput axes_pass_input;
 	axes_pass_input.assign(0, "vertex_position", axes_mesh.vertices.data(), axes_mesh.vertices.size(), 4, GL_FLOAT);
@@ -304,11 +365,18 @@ int main(int argc, char* argv[])
 	bool draw_skeleton = true;
 	bool draw_object = true;
 	bool draw_cylinder = true;
+	
+	bool initialize_textures = false;
+
+	if (argc >= 3) {
+		mesh.loadAnimationFrom(argv[2]);
+		initialize_textures = true;
+	}
 
 	while (!glfwWindowShouldClose(window)) {
 		// Setup some basic window stuff.
 		glfwGetFramebufferSize(window, &window_width, &window_height);
-		glViewport(0, 0, window_width, window_height);
+		glViewport(0, 0, main_view_width, main_view_height);
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glEnable(GL_DEPTH_TEST);
 		glEnable(GL_MULTISAMPLE);
@@ -321,18 +389,99 @@ int main(int argc, char* argv[])
 
 		gui.updateMatrices();
 		mats = gui.getMatrixPointers();
-#if 0
-		std::cerr << model_data() << '\n';
-		std::cerr << "call from outside: " << std_model->data_source() << "\n";
-		std_model->bind(0);
-#endif
 
-		if (gui.isPoseDirty()) {
-			mesh.updateAllMatrices();
+		std::stringstream title;
+		float cur_time = gui.getCurrentPlayTime();
+		title << window_title;
+		if (gui.isPlaying()) {
+			title << " Playing: "
+			      << std::setprecision(2)
+			      << std::setfill('0') << std::setw(6)
+			      << cur_time << " sec";
+			mesh.updateAnimation(cur_time);
+		} else if (gui.isPoseDirty()) {
+			title << " Editing";
 			mesh.updateAnimation();
 			gui.clearPose();
 		}
+		else
+		{
+			title << " Paused: "
+				<< std::setprecision(2)
+				<< std::setfill('0') << std::setw(6)
+				<< cur_time << " sec";
+		}
 
+		glfwSetWindowTitle(window, title.str().data());
+
+		// FIXME: update the preview textures here
+		if (argc >= 3 && initialize_textures) {
+			glViewport(0, 0, preview_width, preview_height);
+			int i = 0;
+			for (Keyframe* keyframe: mesh.keyframes) {
+				mesh.setPoseFromKeyframe(i);
+				gui.updateMatrices();
+				mats = gui.getMatrixPointers();
+				mesh.updateAnimation();
+				TextureToRender* tex = &(keyframe->texture);
+				tex->bind();
+				CHECK_GL_ERROR(glClear(GL_DEPTH_BUFFER_BIT));
+				if (draw_floor) {
+					floor_pass.setup();
+					// Draw our triangles.
+					CHECK_GL_ERROR(glDrawElements(GL_TRIANGLES,
+						floor_faces.size() * 3,
+						GL_UNSIGNED_INT, 0));
+				}
+				if (draw_object) {
+					object_pass.setup();
+					int mid = 0;
+					while (object_pass.renderWithMaterial(mid))
+						mid++;
+#if 0
+					// For debugging also
+					if (mid == 0) // Fallback
+						CHECK_GL_ERROR(glDrawElements(GL_TRIANGLES, mesh.faces.size() * 3, GL_UNSIGNED_INT, 0));
+#endif
+				}
+				tex->unbind();
+				i++;
+			}
+			initialize_textures = false;
+			mesh.loadDefaults();
+			gui.updateMatrices();
+			mats = gui.getMatrixPointers();
+			mesh.updateAnimation();
+		}
+		if (gui.getTextureToRender() != nullptr) {
+			TextureToRender* texture = gui.getTextureToRender();
+			glViewport(0, 0, preview_width, preview_height);
+			texture->bind();
+			CHECK_GL_ERROR(glClear(GL_DEPTH_BUFFER_BIT));
+			if (draw_floor) {
+				floor_pass.setup();
+				// Draw our triangles.
+				CHECK_GL_ERROR(glDrawElements(GL_TRIANGLES,
+					floor_faces.size() * 3,
+					GL_UNSIGNED_INT, 0));
+			}
+
+			// Draw the model
+			if (draw_object) {
+				object_pass.setup();
+				int mid = 0;
+				while (object_pass.renderWithMaterial(mid))
+					mid++;
+#if 0
+				// For debugging also
+				if (mid == 0) // Fallback
+					CHECK_GL_ERROR(glDrawElements(GL_TRIANGLES, mesh.faces.size() * 3, GL_UNSIGNED_INT, 0));
+#endif
+			}
+			texture->unbind();
+			gui.resetTexture();
+		}
+		glViewport(0, 0, main_view_width, main_view_height);
 		int current_bone = gui.getCurrentBone();
 
 		// Draw bones first.
@@ -344,7 +493,6 @@ int main(int argc, char* argv[])
 			CHECK_GL_ERROR(glDrawElements(GL_LINES,
 			                              bone_indices.size() * 2,
 			                              GL_UNSIGNED_INT, 0));
-
 		}
 		draw_cylinder = (current_bone != -1 && gui.isTransparent());
 		if (draw_cylinder) {
@@ -352,7 +500,7 @@ int main(int argc, char* argv[])
 			glm::vec3 beg_pos = curr_joint.wcoord;
 			glm::vec3 end_pos = curr_joint.position;
 			float height = glm::length(end_pos - beg_pos);
-			
+
 			glm::vec3 cylinder_axis = glm::normalize(end_pos - beg_pos);
 			glm::vec3 y_axis = glm::normalize(glm::vec3(0, 1, 0));
 			auto dot = glm::dot(cylinder_axis, y_axis);
@@ -438,8 +586,29 @@ int main(int argc, char* argv[])
 #endif
 		}
 
-		CHECK_GL_ERROR(glReadPixels(0, 0, window_width, window_height, GL_RGB, GL_BYTE, gui.pixel_buffer));
+		CHECK_GL_ERROR(glReadPixels(0, 0, main_view_width, main_view_height, GL_RGB, GL_BYTE, gui.pixel_buffer));
 
+		// FIXME: Draw previews here, note you need to call glViewport
+		//glBufferData(GL_ARRAY_BUFFER, sizeof(g_quad_vertex_buffer_data), g_quad_vertex_buffer_data, GL_STATIC_DRAW);
+		for (int i = 0; i < mesh.keyframes.size(); i++) {
+			glViewport(main_view_width, preview_bar_height - (i+1)*preview_height - gui.current_scroll, preview_width, preview_height);
+			Keyframe* keyframe = mesh.keyframes[i];
+			keyframe->texture.bind();
+			CHECK_GL_ERROR(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+			//mesh.keyframes[i]->texture.bind();
+			//CHECK_GL_ERROR(glClear(GL_DEPTH_BUFFER_BIT));
+			if (gui.selected_keyframe == i) {
+				preview_show_border = true;
+			}
+			else {
+				preview_show_border = false;
+			}
+			preview_pass.setup();
+			CHECK_GL_ERROR(glDrawElements(GL_TRIANGLES, mesh.faces.size() * 3, GL_UNSIGNED_INT, 0));
+			keyframe->texture.unbind();
+			//CHECK_GL_ERROR(glDrawElements(GL_PATCHES, preview_faces.size() * 4, GL_UNSIGNED_INT, 0));
+			//mesh.keyframes[i]->texture.unbind();
+		}
 		// Poll and swap.
 		glfwPollEvents();
 		glfwSwapBuffers(window);

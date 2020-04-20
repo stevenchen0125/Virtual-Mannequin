@@ -137,7 +137,7 @@ RenderPass::RenderPass(int vao, // -1: create new VAO, otherwise use given VAO
 	unilocs_.resize(uniforms.size());
 	for (size_t i = 0; i < uniforms.size(); i++) {
 		CHECK_GL_ERROR(unilocs_[i] = glGetUniformLocation(sp_, uniforms[i]->name.c_str()));
-		std::cerr << "Uniform " << uniforms[i]->name << " has location " << unilocs_[i] << std::endl;
+		// std::cerr << "Uniform " << uniforms[i]->name << " has location " << unilocs_[i] << std::endl;
 	}
 	if (input_.hasMaterial()) {
 		createMaterialTexture();

@@ -55,7 +55,7 @@ class MMDAdapter {
 		do {
 			const auto& bone = model_.GetBone(bone_id);
 			int parent = bone.GetParentIndex();
-			if (parent < 0)
+			if (parent == mmd::nil)
 				break;
 			bone_id = parent;
 		} while (true);
@@ -80,6 +80,11 @@ public:
 			size_t useful_bone_id = 0;
 			for (size_t i = 0; i < model_.GetBoneNum(); i++) {
 				if (!isBoneHasRoot0(i)) {
+					pmd_bone_to_useful_bone_[i] = -1;
+					continue;
+				}
+				if(!model_.GetBone(i).IsChildUseID() || model_.GetBone(i).GetChildIndex() == 0)
+				{
 					pmd_bone_to_useful_bone_[i] = -1;
 					continue;
 				}
@@ -165,15 +170,17 @@ public:
 	{
 		if (useful_bone_id >= int(useful_bone_to_pmd_bone_.size()) || useful_bone_id < 0)
 			return false;
-		int id = useful_bone_to_pmd_bone_[useful_bone_id];
+		int id = useful_bone_to_pmd_bone_[useful_bone_id];		
 		const auto& bone = model_.GetBone(id);
 		size_t mmd_parent = bone.GetParentIndex();
+		size_t mmd_child = bone.GetChildIndex();
+		const auto& child_bone = model_.GetBone(mmd_child);
 		if (mmd_parent == mmd::nil) {
 			parent = -1;
-			wcoord = glm::vec3(conv(bone.GetPosition()));
+			wcoord = glm::vec3(conv(child_bone.GetPosition()));
 		} else {
 			parent = pmd_bone_to_useful_bone_[int(mmd_parent)];
-			wcoord = glm::vec3(conv(bone.GetPosition()));
+			wcoord = glm::vec3(conv(child_bone.GetPosition()));
 		}
 #if 0
 		std::cerr << "Joint " << id << " type " <<

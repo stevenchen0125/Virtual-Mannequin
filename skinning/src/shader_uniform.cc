@@ -89,6 +89,7 @@ make_texture(const std::string& name,
 	ret->sampler_source = sampler_source;
 	ret->texture_unit = texture_unit;
 	ret->texture_source = texture_source;
+	ret->name = name;
 	return ret;
 }
 

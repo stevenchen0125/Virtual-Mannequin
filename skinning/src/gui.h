@@ -5,6 +5,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <GLFW/glfw3.h>
 
+#include <chrono>
+#include <glm/gtx/string_cast.hpp>
+#include "texture_to_render.h"
+
 struct Mesh;
 
 /*
@@ -16,7 +20,7 @@ struct MatrixPointers {
 
 class GUI {
 public:
-	GUI(GLFWwindow*, int view_width = -1, int view_height = -1, int preview_height = -1);
+	GUI(GLFWwindow*, int view_width = -1, int view_height = -1, int preview_height = -1, int preview_width = -1);
 	~GUI();
 	void assignMesh(Mesh*);
 
@@ -47,6 +51,11 @@ public:
 	float getCurrentPlayTime() const;
 
 	void* pixel_buffer;
+	TextureToRender* getTextureToRender() { return texture_to_render; }
+	void resetTexture() { texture_to_render = nullptr; }
+
+	int current_scroll = 0;
+	int selected_keyframe = -1;
 
 private:
 	GLFWwindow* window_;
@@ -54,7 +63,7 @@ private:
 
 	int window_width_, window_height_;
 	int view_width_, view_height_;
-	int preview_height_;
+	int preview_height_, preview_width_;
 
 	bool drag_state_ = false;
 	bool fps_mode_ = false;
@@ -69,6 +78,8 @@ private:
 	float rotation_speed_ = 0.02f;
 	float zoom_speed_ = 0.1f;
 	float aspect_;
+
+	float scroll_speed = 20.0f;
 
 	glm::vec3 eye_ = glm::vec3(0.0f, 0.1f, camera_distance_);
 	glm::vec3 up_ = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -85,9 +96,14 @@ private:
 	bool captureWASDUPDOWN(int key, int action);
 
 	bool play_ = false;
+	bool reset_ = true;
 
 	int intersectCylinder(glm::vec3 direction, glm::vec3 position);
 	void updateAllTransformations(int curr_bone, glm::mat4 updateT, bool use_update);
+
+	std::chrono::time_point<std::chrono::system_clock> start, curr_time, pause_start;
+	std::chrono::duration<float> dur, pause_dur;
+	TextureToRender* texture_to_render = nullptr;
 };
 
 #endif

@@ -9,7 +9,9 @@
 #include <glm/gtx/transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include <glm/gtx/string_cast.hpp>
+namespace {
+	constexpr glm::fquat identity_quat(1.0, 0.0, 0.0, 0.0);
+}
 
 /*
  * For debugging purpose.
@@ -40,11 +42,6 @@ const glm::fquat* Skeleton::collectJointRot() const
 	return cache.rot.data();
 }
 
-const glm::mat4* Skeleton::collectJointRotations() const
-{
-	return cache.rotations.data();
-}
-
 // FIXME: Implement bone animation.
 
 void Skeleton::refreshCache(Configuration* target)
@@ -53,11 +50,9 @@ void Skeleton::refreshCache(Configuration* target)
 		target = &cache;
 	target->rot.resize(joints.size());
 	target->trans.resize(joints.size());
-	target->rotations.resize(joints.size());
 	for (size_t i = 0; i < joints.size(); i++) {
 		target->rot[i] = joints[i].orientation;
 		target->trans[i] = joints[i].position;
-		//target->rotations[i] = joints[i].D * glm::inverse(joints[i].U);
 	}
 }
 
@@ -70,10 +65,144 @@ Mesh::~Mesh()
 {
 }
 
-//glm::mat4 Mesh::calculateSkinningU(int id)
-//{
-//	return calculateU(id);
-//}
+Keyframe* Mesh::getLastKeyFrame()
+{
+	Keyframe* keyframe = keyframes[keyframes.size() - 1];
+	return keyframe;
+}
+
+void Mesh::addKeyframe()
+{
+	Keyframe* newKeyframe = new Keyframe();
+	keyframes.push_back(newKeyframe);
+	Keyframe* keyframe = keyframes[keyframes.size()-1];
+	keyframe->U.clear();
+	keyframe->T.clear();
+	keyframe->D.clear();
+	keyframe->orientation.clear();
+	keyframe->rel_orientation.clear();
+	updateAllMatrices();
+	for (int i = 0; (unsigned)i < skeleton.joints.size(); i++) {
+		Joint* curr_joint = &(skeleton.joints[i]);
+		keyframe->U.push_back(curr_joint->U);
+		keyframe->T.push_back(curr_joint->T);
+		keyframe->D.push_back(curr_joint->D);
+		keyframe->orientation.push_back(curr_joint->orientation);
+		keyframe->rel_orientation.push_back(curr_joint->rel_orientation);
+	}
+}
+
+void Mesh::updateKeyframe(int keyframeid)
+{
+	Keyframe* keyframe = keyframes[keyframeid];
+	keyframe->U.clear();
+	keyframe->T.clear();
+	keyframe->D.clear();
+	keyframe->orientation.clear();
+	keyframe->rel_orientation.clear();
+	updateAllMatrices();
+	for (int i = 0; (unsigned)i < skeleton.joints.size(); i++) {
+		Joint* curr_joint = &(skeleton.joints[i]);
+		keyframe->U.push_back(curr_joint->U);
+		keyframe->T.push_back(curr_joint->T);
+		keyframe->D.push_back(curr_joint->D);
+		keyframe->orientation.push_back(curr_joint->orientation);
+		keyframe->rel_orientation.push_back(curr_joint->rel_orientation);
+	}
+}
+
+void Mesh::deleteKeyframe(int keyframeid)
+{
+	Keyframe* keyframe = keyframes[keyframeid];
+	keyframes.erase(keyframes.begin()+keyframeid, keyframes.begin()+keyframeid+1);
+	keyframe->U.clear();
+	keyframe->T.clear();
+	keyframe->D.clear();
+	keyframe->orientation.clear();
+	keyframe->rel_orientation.clear();
+	keyframe->texture.~TextureToRender();
+	free(keyframe);
+}
+
+void Mesh::setPoseFromKeyframe(int keyframeid)
+{
+	if (keyframes.size() == 0) {
+		return;
+	}
+	Keyframe* keyframe = keyframes[keyframeid];
+	for (int i = 0; (unsigned)i < skeleton.joints.size(); i++) {
+		Joint* curr_joint = &(skeleton.joints[i]);
+		glm::mat4 curr_T = keyframe->T[i];
+		glm::mat4 curr_U = keyframe->U[i];
+		glm::mat4 curr_D = keyframe->D[i];
+		glm::fquat curr_orientation = keyframe->orientation[i];
+		glm::fquat rel_orientation = keyframe->rel_orientation[i];
+		curr_joint->U = curr_U;
+		curr_joint->T = curr_T;
+		curr_joint->D = curr_D;
+		curr_joint->orientation = curr_orientation;
+		curr_joint->rel_orientation = rel_orientation;
+	}
+	updateAllPositionsAndRotations();
+}
+
+void Mesh::setInterpolation(int keyframeid, float percent)
+{
+	//MAYBE: NEED TO DO THIS METHOD STILL
+	Keyframe* curr_keyframe = keyframes[keyframeid];
+	Keyframe* next_keyframe = keyframes[keyframeid + 1];
+	for (int i = 0; (unsigned)i < skeleton.joints.size(); i++) {
+		Joint* curr_joint = &(skeleton.joints[i]);
+		glm::mat4 curr_T = curr_keyframe->T[i];
+		glm::mat4 curr_U = curr_keyframe->U[i];
+		glm::mat4 curr_D = curr_keyframe->D[i];
+
+		glm::mat4 next_T = next_keyframe->T[i];
+		glm::mat4 next_U = next_keyframe->U[i];
+		glm::mat4 next_D = next_keyframe->D[i];
+
+		glm::mat4 curr_mat = curr_D * glm::inverse(curr_U);
+		glm::mat4 next_mat = next_D * glm::inverse(next_U);
+		
+		glm::mat4 extract_translation = glm::mat4(0.0f);
+		glm::vec4 curr_trans, next_trans;
+
+		extract_translation = glm::mat4(0.0f);
+		extract_translation[3] = -((curr_mat)[3]);
+		curr_trans = -extract_translation[3];
+		extract_translation[3][3] = 0;
+		glm::fquat curr_orientation = glm::quat_cast(curr_mat + extract_translation);
+
+		extract_translation = glm::mat4(0.0f);
+		extract_translation[3] = -((next_mat)[3]);
+		next_trans = -extract_translation[3];
+		extract_translation[3][3] = 0;
+		glm::fquat next_orientation = glm::quat_cast(next_mat + extract_translation);
+
+		//glm::vec4 trans = glm::mix(curr_trans, next_trans, percent);
+
+		glm::fquat set_orientation = glm::mix(curr_orientation, next_orientation, percent);
+		//glm::mat4 mat = glm::toMat4(set_orientation);
+		//mat[3] = trans;
+
+		glm::fquat curr_rel_orientation = curr_keyframe->rel_orientation[i];
+		glm::fquat next_rel_orientation = next_keyframe->rel_orientation[i];
+		glm::fquat set_rel_orientation = glm::mix(curr_rel_orientation, next_rel_orientation, percent);
+		curr_joint->rel_orientation = set_rel_orientation;
+		curr_joint->orientation = set_orientation;
+	}
+	setTFromRelOrientation();
+	updateAllPositionsAndRotations();
+}
+
+void Mesh::setTFromRelOrientation()
+{
+	for (int i = 0; (unsigned)i < skeleton.joints.size(); i++) {
+		Joint* curr_joint = &(skeleton.joints[i]);
+		curr_joint->T = glm::toMat4(curr_joint->rel_orientation);
+	}
+	updateAllMatrices();
+}
 
 void Mesh::updateAllMatrices()
 {
@@ -81,7 +210,22 @@ void Mesh::updateAllMatrices()
 		Joint* curr_joint = &(skeleton.joints[i]);
 		curr_joint->D = calculateD(i);
 	}
-	updateAllRotations();
+	//updateAllRotations();
+}
+
+void Mesh::updateAllPositionsAndRotations()
+{
+	for (int i = 0; (unsigned)i < skeleton.joints.size(); i++) {
+		Joint* curr_joint = &(skeleton.joints[i]);
+
+		curr_joint->position = glm::vec3(curr_joint->D * glm::inverse(curr_joint->U) * glm::vec4(curr_joint->init_position, 1));
+		curr_joint->wcoord = glm::vec3(curr_joint->D * glm::inverse(curr_joint->U) * glm::vec4(curr_joint->init_wcoord, 1));
+
+		glm::mat4 extract_translation = glm::mat4(0.0f);
+		extract_translation[3] = -((curr_joint->D * glm::inverse(curr_joint->U))[3]);
+		extract_translation[3][3] = 0;
+		curr_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);
+	}
 }
 
 void Mesh::updateAllRotations()
@@ -91,6 +235,26 @@ void Mesh::updateAllRotations()
 		Joint* curr_joint = &(skeleton.joints[i]);
 		curr_joint->D = calculateD(i);
 	}
+}
+
+void Mesh::loadDefaults()
+{
+	for (int i = 0; (unsigned)i < skeleton.joints.size(); i++) {
+		Joint* curr_joint = &(skeleton.joints[i]);
+		curr_joint->T = glm::mat4(1.0f);
+		curr_joint->orientation = glm::fquat(1.0f, 0.0f, 0.0f, 0.0f);
+		curr_joint->rel_orientation = glm::fquat(1.0f, 0.0f, 0.0f, 0.0f);
+
+		/*curr_joint->position = glm::vec3(curr_joint->D * glm::inverse(curr_joint->U) * glm::vec4(curr_joint->init_position, 1));
+		curr_joint->wcoord = glm::vec3(curr_joint->D * glm::inverse(curr_joint->U) * glm::vec4(curr_joint->init_wcoord, 1));
+
+		glm::mat4 extract_translation = glm::mat4(0.0f);
+		extract_translation[3] = -((curr_joint->D * glm::inverse(curr_joint->U))[3]);
+		extract_translation[3][3] = 0;
+		curr_joint->orientation = glm::quat_cast(curr_joint->D * glm::inverse(curr_joint->U) + extract_translation);*/
+	}
+	updateAllMatrices();
+	updateAllPositionsAndRotations();
 }
 
 glm::mat4 Mesh::calculateU(int id)
@@ -109,25 +273,6 @@ glm::mat4 Mesh::calculateU(int id)
 		return parentU * B;
 	}
 }
-
-//glm::mat4 Mesh::calculateSkinningD(int id)
-//{
-//	Joint* curr_joint = &skeleton.joints[id];
-//	Joint* parent_joint;
-//	int parent_index = curr_joint->parent_index;
-//	if (parent_index == -1) {
-//		glm::mat4 B = glm::mat4(1.0f);
-//		B[3] = glm::vec4(curr_joint->position, 1) - glm::vec4(0, 0, 0, 0);
-//		return B * curr_joint->skinning_T;
-//	}
-//	else
-//	{
-//		parent_joint = &skeleton.joints[curr_joint->parent_index];
-//		glm::mat4 B = glm::mat4(1.0f);
-//		B[3] = glm::vec4(curr_joint->init_position, 1) - glm::vec4(parent_joint->init_position, 0);
-//		return calculateSkinningD(parent_index) * B * curr_joint->skinning_T;
-//	}
-//}
 
 glm::mat4 Mesh::calculateD(int id)
 {
@@ -158,24 +303,25 @@ void Mesh::loadPmd(const std::string& fn)
 	// FIXME: load skeleton and blend weights from PMD file,
 	//        initialize std::vectors for the vertex attributes,
 	//        also initialize the skeleton as needed
-
 	glm::vec3 wcoord;
 	int parent;
-	
+
 	int curr_id = 0;
 	skeleton.joints.clear();
 	while (mr.getJoint(curr_id, wcoord, parent)) {
 		Joint curr_joint;
 		if (parent == -1) {
 			curr_joint = Joint(curr_id, wcoord, parent);
-			curr_joint.wcoord = glm::vec3(0,0,0);
+			curr_joint.wcoord = glm::vec3(0, 0, 0);
 			curr_joint.init_wcoord = curr_joint.wcoord;
+			//std::cerr << glm::to_string(curr_joint.wcoord) << " " << glm::to_string(wcoord) << std::endl;
 		}
 		else
 		{
 			curr_joint = Joint(curr_id, wcoord, parent);
 			curr_joint.wcoord = skeleton.joints[parent].position;
 			curr_joint.init_wcoord = curr_joint.wcoord;
+			//std::cerr << glm::to_string(curr_joint.wcoord) << " " << glm::to_string(wcoord) << std::endl;
 		}
 		//curr_joint = Joint(curr_id, wcoord, parent);
 		curr_joint.T = glm::mat4(1.0f);
@@ -190,6 +336,7 @@ void Mesh::loadPmd(const std::string& fn)
 		//curr->skinning_D = calculateSkinningD(curr_id);
 		//curr->skinning_T = glm::mat4(1.0f);
 		curr->orientation = glm::fquat(1.0f, 0.0f, 0.0f, 0.0f);
+		curr->rel_orientation = glm::fquat(1.0f, 0.0f, 0.0f, 0.0f);
 		curr->is_root = parent == -1;
 		if (curr->parent_index != -1) {
 			skeleton.joints[skeleton.joints[skeleton.joints.size() - 1].parent_index].children.push_back(curr_id);
@@ -235,7 +382,25 @@ void Mesh::computeBounds()
 void Mesh::updateAnimation(float t)
 {
 	skeleton.refreshCache(&currentQ_);
+	if (t == -1.0f) {
+		return;
+	}
 	// FIXME: Support Animation Here
+	if (keyframes.size() == 0) {
+		return;
+	}
+	if (t <= 0 && keyframes.size() >= 1) {
+		setPoseFromKeyframe(0);
+	}
+	else if (t > keyframes.size()-1 && t > 0) {
+		setPoseFromKeyframe(keyframes.size()-1);
+	}
+	else {
+		int frame = (int)t;
+		float percent = t - frame;
+		setInterpolation(frame, percent);
+	}
+	skeleton.refreshCache(&currentQ_);
 }
 
 const Configuration*

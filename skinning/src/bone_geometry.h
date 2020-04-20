@@ -10,6 +10,9 @@
 #include <glm/gtc/quaternion.hpp>
 #include <mmdadapter.h>
 
+#include <glm/gtx/string_cast.hpp>
+#include "texture_to_render.h"
+
 class TextureToRender;
 
 struct BoundingBox {
@@ -39,47 +42,38 @@ struct Joint {
 
 	int joint_index;
 	int parent_index;
-	glm::vec3 wcoord;
+	glm::vec3 wcoord;	//beginning of joint
 	glm::vec3 init_wcoord;
-	glm::vec3 position;             // position of the joint
-	glm::fquat orientation;         // rotation w.r.t. initial configuration
-	glm::fquat rel_orientation;     // rotation w.r.t. it's parent. Used for animation.
+	glm::vec3 position;             // position of the joint - actually the end of the joint
+	glm::fquat orientation = glm::fquat(1.0, 0.0, 0.0, 0.0);         // rotation w.r.t. initial configuration
+	glm::fquat rel_orientation = glm::fquat(1.0, 0.0, 0.0, 0.0); // rotation w.r.t. it's parent. Used for animation.
 	glm::vec3 init_position;        // initial position of this joint
 	glm::vec3 init_rel_position;    // initial relative position to its parent
 	std::vector<int> children;
 	bool is_root;
 
-	//Maybe use orientation and rel_orientation instead of T to fix weird rolling issues
 	glm::mat4 T;
 	glm::mat4 D;
 	glm::mat4 U;
 	glm::mat4 total_roll;
-	//glm::mat4 passed_up_T;
-
-	//glm::mat4 skinning_T;
-	//glm::mat4 skinning_D;
-	//glm::mat4 skinning_U;
-	//glm::vec3 skinning_position;
 };
 
 struct Configuration {
 	std::vector<glm::vec3> trans;
 	std::vector<glm::fquat> rot;
-	std::vector<glm::mat4> rotations;
 
 	const auto& transData() const { return trans; }
 	const auto& rotData() const { return rot; }
-	const auto& rotationData() const { return rotations; }
 };
 
-struct KeyFrame {
-	std::vector<glm::fquat> rel_rot;
-
-	static void interpolate(const KeyFrame& from,
-	                        const KeyFrame& to,
-	                        float tau,
-	                        KeyFrame& target);
-};
+//struct KeyFrame {
+//	std::vector<glm::fquat> rel_rot;
+//
+//	static void interpolate(const KeyFrame& from,
+//	                        const KeyFrame& to,
+//	                        float tau,
+//	                        KeyFrame& target);
+//};
 
 struct LineMesh {
 	std::vector<glm::vec4> vertices;
@@ -96,7 +90,17 @@ struct Skeleton {
 	const glm::fquat* collectJointRot() const;
 
 	// FIXME: create skeleton and bone data structures
-	const glm::mat4* collectJointRotations() const;
+};
+
+struct Keyframe {
+	std::vector<glm::mat4> T;
+	std::vector<glm::mat4> D;
+	std::vector<glm::mat4> U;
+
+	std::vector<glm::fquat> orientation;
+	std::vector<glm::fquat> rel_orientation;
+
+	TextureToRender texture;
 };
 
 struct Mesh {
@@ -132,11 +136,20 @@ struct Mesh {
 	glm::mat4 calculateU(int id);
 	glm::mat4 calculateD(int id);
 
-	/*glm::mat4 calculateSkinningU(int id);
-	glm::mat4 calculateSkinningD(int id);*/
-
 	void updateAllMatrices();
 	void updateAllRotations();
+
+	std::vector<Keyframe*> keyframes;
+	void addKeyframe();
+	void updateKeyframe(int keyframeid);
+	void deleteKeyframe(int keyframeid);
+	void setInterpolation(int keyframeid, float percent);
+	void setPoseFromKeyframe(int keyframeid);
+	void updateAllPositionsAndRotations();
+	void setTFromRelOrientation();
+	Keyframe* getLastKeyFrame();
+
+	void loadDefaults();
 
 private:
 	void computeBounds();
